@@ -1,0 +1,591 @@
+---
+title: "Which past president is Donald Trump most like?"
+author: 'Author: Yijia Li'
+output:
+  html_document: default
+  html_notebook: default
+  pdf_document: default
+---
+
+# Introduction
+
+As a well-known feature of Google, if you start typing in a search, Google offers autocomplete suggestions before you’ve even finished typing. I tried to type "Compare Trump to..", and the top four suggestions Google gave are "Compare Trump to Nixon/Lincoln/Mussolini/Obama," three of which are past presidents of the United States. This shows that people are most interested in comparing Trump to Nixon, Lincoln, and Obama. So, in this report, to analyze the similarities and differences between Trump and these three past presidents from a linguistic perspective, I will explore the texts of their inaugural speeches and visualize the results using text mining and natural language processing techniques. The following questions about their inaugural speeches will be answered.
+
+1. What are their most frequently used words?
+2. Do they like to use long or short sentences?
+3. How do they shift between different sentiments in their speeches?
+4. How do they alternate between different topics?
+
+
+# 0. Data Preparation
+
+### Step 0-1. Check and install needed packages. Load the libraries and functions.
+
+```{r, message=FALSE, warning=FALSE}
+packages.used=c("rvest", "tibble", "qdap", 
+                "sentimentr", "gplots", "dplyr",
+                "tm", "syuzhet", "factoextra", 
+                "beeswarm", "scales", "RColorBrewer",
+                "RANN", "tm", "topicmodels","tidytext","wordcloud")
+
+# check packages that need to be installed.
+packages.needed=setdiff(packages.used, 
+                        intersect(installed.packages()[,1], 
+                                  packages.used))
+# install additional packages
+if(length(packages.needed)>0){
+  install.packages(packages.needed, dependencies = TRUE)
+}
+
+# load packages
+library("rvest")
+library("tibble")
+library("qdap")
+library("sentimentr")
+library("gplots")
+library("dplyr")
+library("tm")
+library("syuzhet")
+library("factoextra")
+library("beeswarm")
+library("scales")
+library("RColorBrewer")
+library("RANN")
+library("tm")
+library("topicmodels")
+library("tidytext")
+library("wordcloud")
+
+source("../lib/plotstacked.R")
+source("../lib/speechFuncs.R")
+```
+
+This notebook was prepared with the following environmental settings.
+
+```{r}
+print(R.version)
+```
+
+### Step 0-2. Data harvest: scrap inaugural speech URLs from <http://www.presidency.ucsb.edu/>.
+
+```{r}
+### Inauguaral speeches
+main.page <- read_html(x = "http://www.presidency.ucsb.edu/inaugurals.php")
+# Get link URLs
+# f.speechlinks is a function for extracting links from the list of speeches. 
+inaug=f.speechlinks(main.page)
+inaug=inaug[-nrow(inaug),] # remove the last line, irrelevant due to error.
+```
+
+### Step 0-3. Using speech metadata posted on <http://www.presidency.ucsb.edu/>, prepare CSV data sets for the speeches. 
+
+```{r}
+inaug.list=read.csv("../data/inauglist.csv", stringsAsFactors = FALSE)
+```
+
+### Step 0-4. Scrap the texts of speeches from the speech URLs.
+
+```{r}
+inaug.list$type=rep("inaug", nrow(inaug.list))
+inaug.list=cbind(inaug.list, inaug)
+```
+
+### Step 0-5. For reproducibility, save scrapped speeches into local folder as individual speech files. 
+
+```{r}
+inaug.list$fulltext=NA
+for(i in seq(nrow(inaug.list))) {
+    text <- read_html(inaug.list$urls[i]) %>% # load the page
+    html_nodes(".displaytext") %>% # isloate the text
+    html_text() # get the text
+  inaug.list$fulltext[i]=text
+  # Create the file name
+  filename <- paste0("../data/fulltext/", 
+                     inaug.list$type[i],
+                     inaug.list$File[i], "-", 
+                     inaug.list$Term[i], ".txt")
+  sink(file = filename) %>% # open file to write 
+  cat(text)  # write the file
+  sink() # close the file
+}
+```
+
+### Step 0-6. Read in the speeches.
+
+```{r}
+folder.path="../data/inaugurals/"
+speeches=list.files(path = folder.path, pattern = "*.txt")
+prex.out=substr(speeches, 6, nchar(speeches)-4)
+
+ff.all<-Corpus(DirSource(folder.path))
+```
+
+# 1. What are their most frequently used words?
+
+### Step 1-1. Text processing.
+
+```{r}
+ff.all<-tm_map(ff.all, stripWhitespace)
+ff.all<-tm_map(ff.all, content_transformer(tolower))
+ff.all<-tm_map(ff.all, removeWords, stopwords("english"))
+ff.all<-tm_map(ff.all, removeWords, character(0))
+ff.all<-tm_map(ff.all, removePunctuation)
+
+tdm.all<-TermDocumentMatrix(ff.all)
+
+tdm.tidy=tidy(tdm.all)
+
+tdm.overall=summarise(group_by(tdm.tidy, term), sum(count))
+```
+
+### Step 1-2. Compute TF-IDF weighted document-term matrices for individual speeches. 
+
+```{r}
+dtm <- DocumentTermMatrix(ff.all,
+                          control = list(weighting = function(x)
+                                             weightTfIdf(x, 
+                                                         normalize =FALSE),
+                                         stopwords = TRUE))
+tdm.tidy=tidy(dtm)
+
+tdm.trump = subset(tdm.tidy,document == 'inaugDonaldJTrump-1.txt')
+tdm.obama = subset(tdm.tidy,document == 'inaugBarackObama-1.txt')
+tdm.nixon = subset(tdm.tidy,document == 'inaugRichardNixon-1.txt')
+tdm.lincoln = subset(tdm.tidy,document == 'inaugAbrahamLincoln-1.txt')
+```
+
+### Step 1-3. Wordcloud - Visualize important words in individual speeches.
+
+```{r}
+wordcloud(tdm.trump$term, tdm.trump$count,
+          scale=c(2,0.5),
+          max.words=30,
+          min.freq=1,
+          random.order=FALSE,
+          rot.per=0.3,
+          use.r.layout=T,
+          random.color=FALSE,
+          colors=brewer.pal(9,"Blues"))
+title(main = 'Trump')
+
+wordcloud(tdm.obama$term, tdm.obama$count,
+          scale=c(2,0.5),
+          max.words=30,
+          min.freq=1,
+          random.order=FALSE,
+          rot.per=0.3,
+          use.r.layout=T,
+          random.color=FALSE,
+          colors=brewer.pal(9,"Blues"))
+title(main = 'Obama')
+
+
+wordcloud(tdm.nixon$term, tdm.nixon$count,
+          scale=c(2,0.5),
+          max.words=30,
+          min.freq=1,
+          random.order=FALSE,
+          rot.per=0.3,
+          use.r.layout=T,
+          random.color=FALSE,
+          colors=brewer.pal(9,"Blues"))
+title(main = 'Nixon')
+
+wordcloud(tdm.lincoln$term, tdm.lincoln$count,
+          scale=c(2,0.5),
+          max.words=30,
+          min.freq=1,
+          random.order=FALSE,
+          rot.per=0.3,
+          use.r.layout=T,
+          random.color=FALSE,
+          colors=brewer.pal(9,"Blues"))
+title(main = 'Lincoln')
+```
+
+Analysis - From the wordcloud, we can see that Trump likes to use simple and straightforward words like "jobs", "workers", "factories", "borders", "dreams". For the other three presidents, while Lincoln also used some simple and straightforward words like "union", "minority", "constitution", Obama used lots of fancy and metaphorical words like "icy", "journey", "winter", "storms".
+
+# 2. Do they like to use long or short sentences?
+
+### Step 2-1. Generate list of sentences.
+
+```{r, message=FALSE, warning=FALSE}
+sentence.list=NULL
+for(i in 1:nrow(inaug.list[])){
+  sentences=sent_detect(inaug.list$fulltext[i],
+                        endmarks = c("?", ".", "!", "|",";"))
+  if(length(sentences)>0){
+    emotions=get_nrc_sentiment(sentences)
+    word.count=word_count(sentences)
+    # colnames(emotions)=paste0("emo.", colnames(emotions))
+    # in case the word counts are zeros?
+    emotions=diag(1/(word.count+0.01))%*%as.matrix(emotions)
+    sentence.list=rbind(sentence.list, 
+                        cbind(inaug.list[i,-ncol(inaug.list)],
+                              sentences=as.character(sentences), 
+                              word.count,
+                              emotions,
+                              sent.id=1:length(sentences)
+                              )
+    )
+  }
+}
+```
+
+### Step 2-2. Some non-sentences exist in raw data due to erroneous extra end-of sentence marks. 
+
+```{r}
+sentence.list=
+  sentence.list%>%
+  filter(!is.na(word.count)) 
+```
+
+### Step 2-3. Beeswarm - Visualize length of sentences.
+
+```{r}
+sel.comparison=c("DonaldJTrump","BarackObama","RichardNixon", "AbrahamLincoln")
+
+sentence.list.sel=sentence.list%>%filter(type=="inaug", File%in%sel.comparison, Term==1)
+sentence.list.sel$File=factor(sentence.list.sel$File)
+
+sentence.list.sel$FileOrdered=reorder(sentence.list.sel$File, 
+                                  sentence.list.sel$word.count, 
+                                  mean, 
+                                  order=T)
+par(mar=c(4, 11, 2, 2))
+
+beeswarm(word.count~FileOrdered, 
+         data=sentence.list.sel,
+         horizontal = TRUE,
+         pch=16, col=alpha(brewer.pal(9, "Set1"), 0.6), 
+         cex=0.55, cex.axis=0.8, cex.lab=0.8,
+         spacing=5/nlevels(sentence.list.sel$FileOrdered),
+         las=2, ylab="", xlab="Number of words in a sentence",
+         main="Inaugural Speeches") 
+```
+
+Analysis - From the beeswarm plot, we can see that Trump has the lowest average number of words in a sentence. He likes to use relatively short sentences, some of which are extremely short. For the other three presidents, while Nixon also used lots of short sentences, Lincoln used some short sentences but also included some very long sentences in his speech.
+
+### Step 2-4. What are these short sentences?
+
+```{r}
+sentence.list%>%
+  filter(File=="DonaldJTrump", 
+         type=="inaug", 
+         word.count<=3)%>%
+  select(sentences)
+
+sentence.list%>%
+  filter(File=="BarackObama", 
+         type=="inaug", 
+         word.count<=3)%>%
+  select(sentences)
+
+sentence.list%>%
+  filter(File=="RichardNixon", 
+         type=="inaug", 
+         word.count<=3)%>%
+  select(sentences)
+
+sentence.list%>%
+  filter(File=="AbrahamLincoln", 
+         type=="inaug", 
+         word.count<=3)%>%
+  select(sentences)
+```
+
+# 3. How do they shift between different sentiments in their speeches?
+
+### Step 3-1. Sentence length variation over the course of the speech, with emotions.
+
+```{r}
+par(mfrow=c(4,1), mar=c(1,0,2,0), bty="n", xaxt="n", yaxt="n", font.main=1)
+
+f.plotsent.len(In.list=sentence.list, InFile="DonaldJTrump", 
+               InType="inaug", InTerm=1, President="Donald Trump")
+
+f.plotsent.len(In.list=sentence.list, InFile="BarackObama", 
+               InType="inaug", InTerm=1, President="Barack Obama")
+
+f.plotsent.len(In.list=sentence.list, InFile="RichardNixon", 
+               InType="inaug", InTerm=1, President="Richard Nixon")
+
+f.plotsent.len(In.list=sentence.list, InFile="AbrahamLincoln", 
+               InType="inaug", InTerm=1, President="Abraham Lincoln")
+
+```
+Analysis - From the bar chart, we can see that Trump likes to use short sentences to convey simple and positive emotions. For the other three presidents, while Nixon's speech is the most similar to Trump's speech, Lincoln used longer sentences to convey more complicated emotions.
+
+### Step 3-2. What are the emotionally charged sentences?
+
+```{r}
+print("Donald Trump")
+speech.df=tbl_df(sentence.list)%>%
+  filter(File=="DonaldJTrump", type=="inaug", Term==1, word.count>=5)%>%
+  select(sentences, anger:trust)
+speech.df=as.data.frame(speech.df)
+as.character(speech.df$sentences[apply(speech.df[,-1], 2, which.max)])
+
+print("Barack Obama")
+speech.df=tbl_df(sentence.list)%>%
+  filter(File=="BarackObama", type=="inaug", Term==1, word.count>=5)%>%
+  select(sentences, anger:trust)
+speech.df=as.data.frame(speech.df)
+as.character(speech.df$sentences[apply(speech.df[,-1], 2, which.max)])
+
+print("Richard Nixon")
+speech.df=tbl_df(sentence.list)%>%
+  filter(File=="RichardNixon", type=="inaug", Term==1, word.count>=5)%>%
+  select(sentences, anger:trust)
+speech.df=as.data.frame(speech.df)
+as.character(speech.df$sentences[apply(speech.df[,-1], 2, which.max)])
+
+print("Abraham Lincoln")
+speech.df=tbl_df(sentence.list)%>%
+  filter(File=="AbrahamLincoln", type=="inaug", Term==1, word.count>=5)%>%
+  select(sentences, anger:trust)
+speech.df=as.data.frame(speech.df)
+as.character(speech.df$sentences[apply(speech.df[,-1], 2, which.max)])
+
+```
+
+### Step 3-3. Bar Chart - Visualize clustering of emotions.
+
+```{r}
+sel.comparison=c("DonaldJTrump","BarackObama","RichardNixon","AbrahamLincoln")
+
+par(mar=c(6, 6, 6, 4))
+emo.means=colMeans(select(sentence.list%>%filter(type=="inaug", File=='DonaldJTrump'), anger:trust)>0.01)
+col.use=c("red2", "darkgoldenrod1", 
+            "chartreuse3", "blueviolet",
+            "darkgoldenrod2", "dodgerblue3", 
+            "darkgoldenrod1", "darkgoldenrod1")
+barplot(emo.means[order(emo.means)], las=2, col=col.use[order(emo.means)], horiz=T, main="Donald Trump", cex.main = 1.1)
+
+par(mar=c(6, 6, 6, 4))
+emo.means=colMeans(select(sentence.list%>%filter(type=="inaug", File=="BarackObama"), anger:trust)>0.01)
+col.use=c("red2", "darkgoldenrod1", 
+            "chartreuse3", "blueviolet",
+            "darkgoldenrod2", "dodgerblue3", 
+            "darkgoldenrod1", "darkgoldenrod1")
+barplot(emo.means[order(emo.means)], las=2, col=col.use[order(emo.means)], horiz=T, main="Barack Obama", cex.main = 1)
+
+par(mar=c(6, 6, 6, 4))
+emo.means=colMeans(select(sentence.list%>%filter(type=="inaug", File=="RichardNixon"), anger:trust)>0.01)
+col.use=c("red2", "darkgoldenrod1", 
+            "chartreuse3", "blueviolet",
+            "darkgoldenrod2", "dodgerblue3", 
+            "darkgoldenrod1", "darkgoldenrod1")
+barplot(emo.means[order(emo.means)], las=2, col=col.use[order(emo.means)], horiz=T, main="Richard Nixon", cex.main = 1.1)
+
+par(mar=c(6, 6, 6, 4))
+emo.means=colMeans(select(sentence.list%>%filter(type=="inaug", File=='AbrahamLincoln'), anger:trust)>0.01)
+col.use=c("red2", "darkgoldenrod1", 
+            "chartreuse3", "blueviolet",
+            "darkgoldenrod2", "dodgerblue3", 
+            "darkgoldenrod1", "darkgoldenrod1")
+barplot(emo.means[order(emo.means)], las=2, col=col.use[order(emo.means)], horiz=T, main="Abraham Lincoln", cex.main = 1.1)
+```
+
+Analysis - From the bar chart we can see that, with "trust", "joy", and "anticipation" being the top three emotions, Trump's speech is generally very positive. Even though his strongest negative emotion is "fear", it is the lowest (0.2) among these four presidents. For the other three presidents, while Nixon's speech shares some similarities with Trump's speech, Lincoln's speech has very strong "fear" emotion (0.5). At the same time, historical context needs to be taken into consideration when analyzing emotions of speeches.
+
+# 4. How do they alternate between different topics?
+
+### Step 4-1. Prepare a corpus of sentence snipets as follows. For each speech, start with sentences and prepare a snipet with a given sentence with the flanking sentences. 
+
+```{r}
+corpus.list=sentence.list[2:(nrow(sentence.list)-1), ]
+sentence.pre=sentence.list$sentences[1:(nrow(sentence.list)-2)]
+sentence.post=sentence.list$sentences[3:(nrow(sentence.list)-1)]
+corpus.list$snipets=paste(sentence.pre, corpus.list$sentences, sentence.post, sep=" ")
+rm.rows=(1:nrow(corpus.list))[corpus.list$sent.id==1]
+rm.rows=c(rm.rows, rm.rows-1)
+corpus.list=corpus.list[-rm.rows, ]
+```
+
+### Step 4-2. Text mining.
+
+```{r}
+docs <- Corpus(VectorSource(corpus.list$snipets))
+writeLines(as.character(docs[[sample(1:nrow(corpus.list), 1)]]))
+```
+
+### Step 4-3. Text processing.
+
+```{r}
+#remove potentially problematic symbols
+docs <-tm_map(docs,content_transformer(tolower))
+writeLines(as.character(docs[[sample(1:nrow(corpus.list), 1)]]))
+
+#remove punctuation
+docs <- tm_map(docs, removePunctuation)
+writeLines(as.character(docs[[sample(1:nrow(corpus.list), 1)]]))
+
+#Strip digits
+docs <- tm_map(docs, removeNumbers)
+writeLines(as.character(docs[[sample(1:nrow(corpus.list), 1)]]))
+
+#remove stopwords
+docs <- tm_map(docs, removeWords, stopwords("english"))
+writeLines(as.character(docs[[sample(1:nrow(corpus.list), 1)]]))
+
+#remove whitespace
+docs <- tm_map(docs, stripWhitespace)
+writeLines(as.character(docs[[sample(1:nrow(corpus.list), 1)]]))
+
+#Stem document
+docs <- tm_map(docs,stemDocument)
+writeLines(as.character(docs[[sample(1:nrow(corpus.list), 1)]]))
+```
+
+### Step 4-4. Gengerate document-term matrices. 
+
+```{r}
+dtm <- DocumentTermMatrix(docs)
+#convert rownames to filenames#convert rownames to filenames
+rownames(dtm) <- paste(corpus.list$type, corpus.list$File,
+                       corpus.list$Term, corpus.list$sent.id, sep="_")
+
+rowTotals <- apply(dtm , 1, sum) #Find the sum of words in each Document
+
+dtm  <- dtm[rowTotals> 0, ]
+corpus.list=corpus.list[rowTotals>0, ]
+```
+
+### Step 4-5. Run LDA.
+
+```{r}
+#Set parameters for Gibbs sampling
+burnin <- 4000
+iter <- 2000
+thin <- 500
+seed <-list(2003,5,63,100001,765)
+nstart <- 5
+best <- TRUE
+
+#Number of topics
+k <- 15
+
+#Run LDA using Gibbs sampling
+ldaOut <-LDA(dtm, k, method="Gibbs", control=list(nstart=nstart, 
+                                                 seed = seed, best=best,
+                                                 burnin = burnin, iter = iter, 
+                                                 thin=thin))
+#write out results
+#docs to topics
+ldaOut.topics <- as.matrix(topics(ldaOut))
+table(c(1:k, ldaOut.topics))
+write.csv(ldaOut.topics,file=paste("../out/LDAGibbs",k,"DocsToTopics.csv"))
+
+#top 6 terms in each topic
+ldaOut.terms <- as.matrix(terms(ldaOut,20))
+write.csv(ldaOut.terms,file=paste("../out/LDAGibbs",k,"TopicsToTerms.csv"))
+
+#probabilities associated with each topic assignment
+topicProbabilities <- as.data.frame(ldaOut@gamma)
+write.csv(topicProbabilities,file=paste("../out/LDAGibbs",k,"TopicProbabilities.csv"))
+```
+
+```{r}
+terms.beta=ldaOut@beta
+terms.beta=scale(terms.beta)
+topics.terms=NULL
+for(i in 1:k){
+  topics.terms=rbind(topics.terms, ldaOut@terms[order(terms.beta[i,], decreasing = TRUE)[1:7]])
+}
+topics.terms
+ldaOut.terms
+```
+
+### Step 4-6. Based on the most popular terms and the most salient terms for each topic, assign a hashtag to each topic.
+
+```{r}
+topics.hash=c("Economy", "America", "Defense", "Belief", "Election", "Patriotism", "Unity", "Government", "Reform", "Temporal", "WorkingFamilies", "Freedom", "Equality", "Misc", "Legislation")
+corpus.list$ldatopic=as.vector(ldaOut.topics)
+corpus.list$ldahash=topics.hash[ldaOut.topics]
+
+colnames(topicProbabilities)=topics.hash
+corpus.list.df=cbind(corpus.list, topicProbabilities)
+```
+
+### Step 4-7. Heatmap - Visualize clustering of topics.
+
+```{r}
+par(mar=c(1,1,1,1))
+topic.summary=tbl_df(corpus.list.df)%>%
+              filter(type%in%c("nomin", "inaug"), File%in%sel.comparison)%>%
+              select(File, Economy:Legislation)%>%
+              group_by(File)%>%
+              summarise_each(funs(mean))
+topic.summary=as.data.frame(topic.summary)
+rownames(topic.summary)=topic.summary[,1]
+
+# [1] "Economy"         "America"         "Defense"         "Belief"         
+# [5] "Election"        "Patriotism"      "Unity"           "Government"     
+# [9] "Reform"          "Temporal"        "WorkingFamilies" "Freedom"        
+# [13] "Equality"        "Misc"            "Legislation"       
+
+topic.plot=c(1, 13, 9, 11, 8, 3, 7)
+print(topics.hash[topic.plot])
+
+heatmap.2(as.matrix(topic.summary[,topic.plot+1]), 
+          scale = "column", key=F, 
+          col = bluered(100),
+          cexRow = 0.9, cexCol = 0.9, margins = c(8, 8),
+          trace = "none", density.info = "none")
+```
+
+Analysis - From the heatmap, we can see that Trump likes to talk about "Unity" and "Economy" the most, and he doesn't seem to care about "Reform" or "Defense" too much. For the other three presidents, while, surprisingly, Nixon's focuses in his speech are almost exactly the same with Trump's, Lincoln and Trump are almost the opposite since Lincoln cared a lot about "Defense", "Reform", "WorkingFamilies", "Government", which are all barely mentioned in Trump's speech.   
+
+### Step 4-7. Stacked line plot - Visualize clustering of topics.
+
+```{r}
+# [1] "Economy"         "America"         "Defense"         "Belief"         
+# [5] "Election"        "Patriotism"      "Unity"           "Government"     
+# [9] "Reform"          "Temporal"        "WorkingFamilies" "Freedom"        
+# [13] "Equality"        "Misc"            "Legislation"       
+ 
+
+par(mfrow=c(5, 1), mar=c(1,1,2,0), bty="n", xaxt="n", yaxt="n")
+
+topic.plot=c(1, 13, 14, 15, 8, 9, 12)
+print(topics.hash[topic.plot])
+
+speech.df=tbl_df(corpus.list.df)%>%filter(File=="DonaldJTrump", type=="inaug", Term==1)%>%select(sent.id, Economy:Legislation)
+speech.df=as.matrix(speech.df)
+speech.df[,-1]=replace(speech.df[,-1], speech.df[,-1]<1/15, 0.001)
+speech.df[,-1]=f.smooth.topic(x=speech.df[,1], y=speech.df[,-1])
+plot.stacked(speech.df[,1], speech.df[,topic.plot+1],
+            xlab="Sentences", ylab="Topic share", main="Donald Trump")
+
+speech.df=tbl_df(corpus.list.df)%>%filter(File=="BarackObama", type=="inaug", Term==1)%>%select(sent.id, Economy:Legislation)
+speech.df=as.matrix(speech.df)
+speech.df[,-1]=replace(speech.df[,-1], speech.df[,-1]<1/15, 0.001)
+speech.df[,-1]=f.smooth.topic(x=speech.df[,1], y=speech.df[,-1])
+plot.stacked(speech.df[,1], speech.df[,topic.plot+1],
+            xlab="Sentences", ylab="Topic share", main="Barack Obama")
+
+speech.df=tbl_df(corpus.list.df)%>%filter(File=="RichardNixon", type=="inaug",Term==1)%>%select(sent.id, Economy:Legislation)
+speech.df=as.matrix(speech.df)
+speech.df[,-1]=replace(speech.df[,-1], speech.df[,-1]<1/15, 0.001)
+speech.df[,-1]=f.smooth.topic(x=speech.df[,1], y=speech.df[,-1])
+plot.stacked(speech.df[,1], speech.df[,topic.plot+1], 
+             xlab="Sentences", ylab="Topic share", main="Richard Nixon")
+
+speech.df=tbl_df(corpus.list.df)%>%filter(File=="AbrahamLincoln", type=="inaug", Term==1)%>%select(sent.id, Economy:Legislation)
+speech.df=as.matrix(speech.df)
+speech.df[,-1]=replace(speech.df[,-1], speech.df[,-1]<1/15, 0.001)
+speech.df[,-1]=f.smooth.topic(x=speech.df[,1], y=speech.df[,-1])
+plot.stacked(speech.df[,1], speech.df[,topic.plot+1],
+            xlab="Sentences", ylab="Topic share", main="Abraham Lincoln")
+
+```
+
+Analysis - From the stacked line plot, we can see that Trump emphasizes on "Economy" and "Legislation" all along his speech. For the other three presidents, while Nixon also emphasized a lot on "Economy" and "Legislation", Lincoln didn't focus on "Economy" or "Legislation" that much but talked a lot about "Government" and "Freedom" instead.
+
+# Conclusion
+
+In this report, I compared Trump to three past presidents of the United States, Nixon, Lincoln, and Obama to see who is Trump most like from a linguistic perspective. I explored the texts of their inaugural speeches by analyzing their most frequent words, typical sentence length, strongest emotions, and most mentioned topics with text mining and natural language processing techniques. In conclusion, we can see that Trump is most like Nixon when it comes to inaugural speeches since they both use shorter sentences, convey mostly positive emotions and care about economy and unity the most.
+
+
+
