@@ -13,6 +13,8 @@ Term: Fall 2017
 
 + Project summary: 
 
+![image](figs/image.png)
+
 As a well-known feature of Google, if you start typing in a search, Google offers autocomplete suggestions before you’ve even finished typing. I tried to type "Compare Trump to..", and the top four suggestions Google gave are "Compare Trump to Nixon/Lincoln/Mussolini/Obama," three of which are past presidents of the United States. This shows that people are most interested in comparing Trump to Nixon, Lincoln, and Obama. 
 
 In this report, I compared Trump to three past presidents of the United States, Nixon, Lincoln, and Obama to see who is Trump most like from a linguistic perspective. I explored the texts of their inaugural speeches and visualized the results using text mining and natural language processing techniques. The following questions about their inaugural speeches were answered.
